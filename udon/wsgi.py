@@ -512,12 +512,14 @@ def response_content(fp):
     return response_view(view)
 
 
-def response_request(req):
+def response_request(req, response_headers = {}):
     response = bottle.HTTPResponse()
     response.status = "%d %s" % (req.status_code, req.reason)
     for key, value in req.headers.items():
         if key not in ('Connection', ):
             response.set_header(key, value)
+    for key in response_headers:
+        response.set_header(key, response_headers[key])
     response.body = req.raw
     return response
 

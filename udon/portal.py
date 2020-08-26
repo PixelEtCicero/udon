@@ -142,6 +142,7 @@ class OpenIDClient:
         self.scope = scope
         self.client_id = client_id
         self.client_secret = client_secret
+        self.scope = scope
 
     def _url(self, action):
         return "%s/auth/realms/%s/protocol/openid-connect/%s" % (self.host, self.realm, action)

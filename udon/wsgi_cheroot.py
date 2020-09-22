@@ -35,5 +35,10 @@ class CherootServer(bottle.ServerAdapter):
         server.ConnectionClass = _connection
         try:
             server.start()
+        except (SystemExit, KeyboardInterrupt):
+            # Workaround to use graceful shutdown:
+            # When calling server.stop() after one of these exception has been raised, cheroot waits for server.serving to be False
+            server.serving = False
+            raise
         finally:
             server.stop()

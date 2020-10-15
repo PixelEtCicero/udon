@@ -378,11 +378,12 @@ def _make_etag(*parts):
 
 
 def response_ok(status = 204):
-    response = bottle.HTTPResponse(status = status)
+    response = bottle.response.copy(cls = bottle.HTTPResponse)
+    response.status = status
     return response
 
 def response_json(value):
-    response = bottle.HTTPResponse()
+    response = bottle.response.copy(cls = bottle.HTTPResponse)
     response.set_header('Content-Type', 'application/json')
     response.body = json.dumps(value)
     return response
@@ -456,7 +457,7 @@ def response_view(view, request = None):
 
     range = _parse_range()
 
-    response = bottle.HTTPResponse()
+    response = bottle.response.copy(cls = bottle.HTTPResponse)
     response.set_header("Accept-Ranges", "bytes")
     response.set_header("Content-Type", view.ctype)
     if isinstance(view.mtime, str):
@@ -513,7 +514,7 @@ def response_content(fp):
 
 
 def response_request(req, response_headers = {}):
-    response = bottle.HTTPResponse()
+    response = bottle.response.copy(cls = bottle.HTTPResponse)
     response.status = "%d %s" % (req.status_code, req.reason)
     for key, value in req.headers.items():
         if key not in ('Connection', ):

@@ -171,12 +171,17 @@ class LogMiddleware:
         request = bottle.request
         response = bottle.response
         _scheme, host, _path, _query_string, _fragment = request.urlparts
+        try:
+            length = int(response.content_length)
+        except:
+            # For chunked requests, no content-length is set
+            length = -1
         return "%.3f %s %s %s %d %d %s %s" % (dt,
                                               environ["REMOTE_ADDR"],
                                               environ.get("HTTP_X_FORWARDED_FOR", "-"),
                                               request.method,
                                               response.status_code,
-                                              response.content_length,
+                                              length,
                                               host,
                                               request.path)
 
@@ -399,7 +404,7 @@ class ResourceView:
         self.etag = etag
 
 
-def response_view(view, request = None):
+def response_view(view, request = None, response_headers = {}):
     if request is None:
         request = bottle.request
 
@@ -484,6 +489,9 @@ def response_view(view, request = None):
     else:
         response.set_header("Content-Length", view.size)
         response.body = view.body
+
+    for key in response_headers:
+        response.set_header(key, response_headers[key])
 
     return response
 

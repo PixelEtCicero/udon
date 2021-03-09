@@ -54,9 +54,9 @@ def reader(path):
 
 
 @contextlib.contextmanager
-def writer(path, expect_size = None, tmpdir = None):
+def writer(path, expect_size = None, tmpdir = None, cksum_func = hashlib.sha256()):
     with udon.path.overwriting(path, tmpdir = tmpdir) as fp:
-        wrt = _ContentWriter(fp, expect_size = expect_size)
+        wrt = _ContentWriter(fp, cksum_func, expect_size = expect_size)
         yield wrt
         wrt.close()
 
@@ -74,9 +74,9 @@ class _ContentWriter:
     size = 0
     wpos = 0
 
-    def __init__(self, fp, expect_size = None):
+    def __init__(self, fp, cksum_func, expect_size = None):
         self.expect_size = expect_size
-        self.cksum = hashlib.sha256()
+        self.cksum = cksum_func
         self.timestamp = int(time.time())
         self.fp = fp
         self._headers = {}

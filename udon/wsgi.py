@@ -557,6 +557,7 @@ DEFAULT_TYPE = {
     'woff': 'application/font-woff',
     'woff2': 'application/font-woff2',
     'xhtml': 'application/xhtml+xml',
+    'map': 'application/json',
 }
 
 def guess_content_type(filename, default = None):

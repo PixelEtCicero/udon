@@ -528,7 +528,11 @@ def response_request(req, response_headers = {}):
         if key not in ('Connection', ):
             response.set_header(key, value)
     for key in response_headers:
-        response.set_header(key, response_headers[key])
+        if response_headers[key] is None:
+            response.headers.pop(bottle._hkey(key), None)
+        else:
+            response.set_header(key, response_headers[key])
+
     response.body = req.raw
     return response
 

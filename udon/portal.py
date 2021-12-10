@@ -113,6 +113,9 @@ class Portal:
             return self.user_public(request)
 
         if scheme == 'Bearer':
+            if len(parts) < 2:
+                raise InvalidCredentials("Invalid authorization header")
+
             access_token = parts[1].strip()
             try:
                 return self.cache.get(access_token)

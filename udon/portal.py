@@ -101,10 +101,10 @@ class Portal:
     def user_bearer(self, request, access_token, jwt):
         raise NotImplementedError
 
-    def user(self, request):
+    def user(self, request, insecure = False):
         auth = request.headers.get("Authorization")
         if not auth:
-            return self.user_noauth(request)
+            return self.user_public(request) if insecure else self.user_noauth(request)
 
         parts = auth.split(' ', 1)
         scheme = parts[0]

@@ -17,6 +17,7 @@
 import collections
 import datetime
 import os
+import pytz
 import stat
 import zipfile
 
@@ -48,7 +49,7 @@ class BaseTree:
 
 
 def _zipinfo_to_info(info):
-    timestamp = int(datetime.datetime(*info.date_time).timestamp())
+    timestamp = int(datetime.datetime(*info.date_time, tzinfo = pytz.utc).timestamp())
     return EntryInfo(info.filename, info.file_size, timestamp, info.is_dir())
 
 

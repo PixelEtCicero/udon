@@ -17,6 +17,7 @@
 import contextlib
 import errno
 import os
+import shutil
 import tempfile
 
 
@@ -53,4 +54,4 @@ def overwriting(path, tmpdir = None, create_dir = True):
         yield fp
         if create_dir:
             makedirs(dirname)
-        os.rename(fp.name, path)
+        shutil.move(fp.name, path)

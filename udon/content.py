@@ -50,6 +50,19 @@ def reader(path):
     except:
         fp.close()
         raise
+
+    offset = fp.tell()
+
+    _seek = fp.seek
+    def seek(pos, whence = 0):
+        return _seek(pos + offset, whence)
+    fp.seek = seek
+
+    _tell = fp.tell
+    def tell():
+        return _tell() - offset
+    fp.tell = tell
+
     return fp
 
 

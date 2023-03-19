@@ -55,7 +55,9 @@ def reader(path):
 
     _seek = fp.seek
     def seek(pos, whence = 0):
-        return _seek(pos + offset, whence)
+        if whence != os.SEEK_END:
+            pos += offset
+        return _seek(pos, whence)
     fp.seek = seek
 
     _tell = fp.tell

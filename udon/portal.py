@@ -25,9 +25,14 @@ import udon.util
 
 
 def parse_jwt(value):
+    """
+    For some reason when using "base64.b64decode" this method fails with the following jwt issued by keycloak:
+    eyJhbGciOiJSUzI1NiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICJ3WnJwakktcnI3WXBYcjViU2F4WWt2bWQwaFZJaktQcHNQeXRNeUJDTUJrIn0.eyJleHAiOjE2ODAwODcxMTIsImlhdCI6MTY4MDA4NjgxMiwianRpIjoiNzM4ZjI3YTQtNDY5OS00NzA0LThhYTctMTVmYTMzOWMwN2FlIiwiaXNzIjoiaHR0cHM6Ly9vbW5pYm9vay5jb20vYXV0aC9yZWFsbXMvb21uaWJvb2siLCJhdWQiOiJhY2NvdW50Iiwic3ViIjoiMWFkNGMwNGMtMTEwYi00ZTEyLThkZjEtYjljY2YzYzA4OTIxIiwidHlwIjoiQmVhcmVyIiwiYXpwIjoib21uaWJvb2stYXBpIiwic2Vzc2lvbl9zdGF0ZSI6ImJjNjliYTljLWQzMTEtNDRlMi1hZjIxLWZjNGI5NWVhOGJlMSIsImFjciI6IjEiLCJhbGxvd2VkLW9yaWdpbnMiOlsiaHR0cHM6Ly9vbW5pYm9vay5jb20iXSwicmVhbG1fYWNjZXNzIjp7InJvbGVzIjpbIm9mZmxpbmVfYWNjZXNzIiwidW1hX2F1dGhvcml6YXRpb24iXX0sInJlc291cmNlX2FjY2VzcyI6eyJhY2NvdW50Ijp7InJvbGVzIjpbIm1hbmFnZS1hY2NvdW50IiwibWFuYWdlLWFjY291bnQtbGlua3MiLCJ2aWV3LXByb2ZpbGUiXX19LCJzY29wZSI6InByb2ZpbGUgb2ZmbGluZV9hY2Nlc3MgZW1haWwiLCJlbWFpbF92ZXJpZmllZCI6dHJ1ZSwibmFtZSI6IkF5xZ9lIEtPw4ciLCJwcmVmZXJyZWRfdXNlcm5hbWUiOiJheXNlLmtvY0BsY2RnYW5rYXJhLm9yZyIsImdpdmVuX25hbWUiOiJBecWfZSIsImZhbWlseV9uYW1lIjoiS0_DhyIsImVtYWlsIjoiYXlzZS5rb2NAbGNkZ2Fua2FyYS5vcmcifQ.xkzHo-Hdm81nQuADEA7VNojNXQI3aoV1VmQ7Z7xTS-3nLsqECMltuu8_OeH8U3E4EO3aU-JX_CmuZ5aUdOlDz93xjRe_umWnq9QLr22YIrVeA6JOhrlfC8O_GsHZk2jmK8PJK2wKNIWwBQgyPn8RtvJ79vyAUD9g4ahiseO4o4fxXqwfzVEflVwOQl-zjZqYCePbue8vE1gtD8FpKLBGRCgkzvmkr8kV365RZwQGkPsB4z3GYNL119Mk6Kj-45Bv9AwY8uaB_8GhYjXAd3O520kRBiLFvAtlAIsjh0vMQc6CsuwnsWIC0uIgrVbXjPYCrVcnSWKvJ9sjAr3hE9Eiww
+    """
     def b64decode(buf):
         buf += "=" * ((4 - len(buf) % 4) % 4)
-        return base64.b64decode(buf)
+        # return base64.b64decode(buf)
+        return base64.urlsafe_b64decode(buf)
     parts= value.split(".")
     return { 'header': json.loads(b64decode(parts[0])),
              'content': json.loads(b64decode(parts[1])),

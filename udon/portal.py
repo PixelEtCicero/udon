@@ -106,6 +106,9 @@ class Portal:
     def user_bearer(self, request, access_token, jwt):
         raise NotImplementedError
 
+    def user_apikey(self, request, access_token):
+        raise NotImplementedError
+
     def user(self, request, insecure = False):
         auth = request.headers.get("Authorization")
         if not auth:
@@ -117,11 +120,12 @@ class Portal:
         if scheme == 'Public':
             return self.user_public(request)
 
-        if scheme == 'Bearer':
-            if len(parts) < 2:
-                raise InvalidCredentials("Invalid authorization header")
+        if len(parts) < 2:
+            raise InvalidCredentials("Invalid authorization header")
 
-            access_token = parts[1].strip()
+        access_token = parts[1].strip()
+
+        if scheme == 'Bearer':
             try:
                 return self.cache.get(access_token)
             except KeyError:
@@ -137,6 +141,9 @@ class Portal:
             user = self.user_bearer(request, access_token, jwt)
             self.cache.set(access_token, user, timeout)
             return user
+
+        if scheme == 'ApiKey':
+            return self.user_apikey(request, access_token)
 
         raise InvalidCredentials("Invalid authorization scheme")
 

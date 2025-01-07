@@ -15,4 +15,5 @@ setup(name="udon",
           "Operating System :: OS Independent",
           "Topic :: Software Development :: Libraries :: Python Modules",
       ],
-      packages=[ "udon", "udon.tests" ])
+      packages=[ "udon", "udon.tests" ],
+      install_requires = [ "pytz" ])

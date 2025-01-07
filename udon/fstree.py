@@ -46,10 +46,13 @@ class BaseTree:
                 raise ValueError('invalid path')
 
 
-
-
 def _zipinfo_to_info(info):
-    timestamp = int(datetime.datetime(*info.date_time, tzinfo = pytz.utc).timestamp())
+    try:
+        # ZipInfo.date_time can be (1980, 1, 0, 0, 0, 0) and cause datetime factory
+        # to raise a "ValueError: day is out of range for month"
+        timestamp = int(datetime.datetime(*info.date_time, tzinfo = pytz.utc).timestamp())
+    except ValueError:
+        timestamp = 0
     return EntryInfo(info.filename, info.file_size, timestamp, info.is_dir())
 
 

@@ -43,13 +43,39 @@ def gethostname():
     return name
 
 
-def _drop_priv(username):
-    pw = pwd.getpwnam(username)
-    groups = list(set([ g.gr_gid for g in grp.getgrall()
-                        if pw.pw_name in g.gr_mem ] + [ pw.pw_gid]))
+def get_pw(username):
+    if username is None:
+        if os.getuid() == 0:
+            sys.stderr.write("Refusing to run as superuser\n")
+            sys.exit(1)
+        pw = pwd.getpwuid(os.getuid())
+    else:
+        pw = pwd.getpwnam(username)
+        if os.getuid() not in (0, pw.pw_uid):
+            sys.stderr.write("Cannot run as user \"%s\"\n" % (username, ))
+            sys.exit(1)
+    return pw
+
+
+def drop_priv(username):
+    pw = get_pw(username)
+    try:
+        os.chdir(pw.pw_dir)
+    except (FileNotFoundError, NotADirectoryError, PermissionError) as exc:
+        sys.stderr.write("Cannot chdir: %d (%s)\n" % (exc.errno, exc.strerror))
+        sys.exit(1)
+
+    groups = list(set([g.gr_gid
+                       for g in grp.getgrall()
+                       if pw.pw_name in g.gr_mem] + [pw.pw_gid]))
     os.setgroups(groups)
-    os.setresgid(pw.pw_gid, pw.pw_gid, pw.pw_gid)
-    os.setresuid(pw.pw_uid, pw.pw_uid, pw.pw_uid)
+
+    try:
+        os.setresgid(pw.pw_gid, pw.pw_gid, pw.pw_gid)
+        os.setresuid(pw.pw_uid, pw.pw_uid, pw.pw_uid)
+    except OSError:
+        os.setgid(pw.pw_gid)
+        os.setuid(pw.pw_uid)
 
 
 def kill(pidfile, signum = signal.SIGKILL):

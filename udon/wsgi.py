@@ -15,6 +15,7 @@
 #
 
 import base64
+import datetime
 import hashlib
 import importlib
 import json
@@ -482,9 +483,20 @@ def response_view(view, request = None, response_headers = {}):
         view.body.close()
     elif range:
         offset, end = range
-        response.set_header("Content-Length", end - offset)
+        length = end - offset
+        response.set_header("Content-Length", length)
         response.set_header("Content-Range",  "bytes %d-%d/%d" % (offset, end - 1, view.size))
-        response.status = "206 Partial Content"
+        # HTTP clients often try to detect if a server supports partial content.
+        # A common way to do this without wasting resources is to request a range
+        # that represents the whole file. In this case, the recommendation from HTTP
+        # is to respond with a 200 status to be consistant with the way HTTP caches work.
+        # And clients should base the detection on the Accept-ranges/Content-Range headers
+        # rather than the status.
+        # Another reason to response 200: if a browser (chrome) receives a 206 response, which Content-Range
+        # matches the Content-Length, it will consider the response valid for a subsequent GET
+        # request WITHOUT range header, and this is counter-intuitive from the client point-of-view
+        # to receive 206 status on a simple GET request.
+        response.status = "206 Partial Content" if view.size > length else "200 OK"
         response.body = _iter_range(view.body, offset, end - offset, None)
     else:
         response.set_header("Content-Length", view.size)

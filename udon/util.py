@@ -24,7 +24,7 @@ class nullcontext:
 def find_locale(header: str, among:list = ["en"], default: str = "en"):
     languages = parse_access_language(header)
     for language in languages:
-        if language["locale"] in Locales:
+        if language["locale"] in among:
             return language["locale"]
     return default
 

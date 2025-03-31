@@ -7,12 +7,8 @@ import time
 import traceback
 
 import fastapi
-from fastapi import Depends
-import fastapi.responses
-from starlette.types import ASGIApp, Message, Receive, Scope, Send
+from starlette.types import ASGIApp, Receive, Scope, Send
 import uvicorn
-
-import udon.util
 
 
 _apis = {}
@@ -89,6 +85,12 @@ class APIStack:
 
 
 class App(fastapi.FastAPI):
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault("docs_url", None)
+        kwargs.setdefault("redoc_url", None)
+        fastapi.FastAPI.__init__(self, **kwargs)
+
     def get(self, path, method, **args):
         fastapi.FastAPI.get(self, path, **args)(method)
 
@@ -138,9 +140,16 @@ def format_exception(exc):
     return "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
 
 
-def run(app, **args):
+def run(app, **kwargs):
+    # Use proxy headers to hydrate request
+    kwargs.setdefault("proxy_headers", True)
+    # Do not put uvicorn server header in all responses
+    kwargs.setdefault("server_header", False)
+    # Prevent uvicorn from patching logging
+    kwargs.setdefault("log_config", None)
+
     try:
-        uvicorn.run(app, **args)
+        uvicorn.run(app, **kwargs)
     except SystemExit:
         pass
     except:  # noqa: E722
@@ -179,32 +188,6 @@ async def log_http_middleware(request: fastapi.Request, call_next):
     return response
 
 
-class LogMiddleware:
-    def __init__(self, app: ASGIApp, *args, **kwargs):
-        self.app = app
-
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        start_time = time.perf_counter()
-        await self.app(scope, receive, send)
-        process_time = time.perf_counter() - start_time
-        length = "-"
-
-        logging.debug(scope)
-        return
-
-        logging.info(
-            "%.3f %s %s %s %d %s %s" % (
-                process_time,
-                ":".join(scope.client),
-                request.headers.get("HTTP_X_FORWARDED_FOR", "-"),
-                request.method,
-                response.status_code,
-                length,
-                request.url
-            )
-        )
-
-
 def streaming(request: fastapi.Request, size: int, fd, timestamp: int = None, etag: str = None, headers: dict = None):
     status = 200
     body = iter(())
@@ -241,24 +224,12 @@ def streaming(request: fastapi.Request, size: int, fd, timestamp: int = None, et
             **headers})
 
 
-def not_found(request: fastapi.Request):
-    # Get not found page
-    locale = find_locale(request)
-    path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "files/errors/404.%s.html" % locale)
-    with open(path, "r") as fp:
-        content = fp.read()
-
-    # Change home link to current website root (for websites)
-    home_link = "%s://%s" % (request.url.scheme, request.url.hostname)
-    content = content.replace('href="https://omnibook.com"', 'href="%s"' % home_link)
-
-    return fastapi.responses.HTMLResponse(content=content,
-                                          status_code=404,
-                                          headers={"Cache-Control": "public, max-age=60"})
+def not_found(detail = None):
+    raise fastapi.HTTPException(404, detail)
 
 
-def find_locale(request: fastapi.Request):
-    return udon.util.find_locale(request.headers.get("Accept-Language", ""))
+def json(data):
+    return fastapi.responses.JSONResponse(data)
 
 
 def parse_range(request: fastapi.Request, size):
@@ -399,3 +370,7 @@ def access_control_headers(method = "GET", origin = None, headers = []):
         # prevents haproxy to put his version, so put both here to prevent invalid responses.
         "Vary": "Origin, Accept-Encoding",
     }
+
+
+def abort(status_code, detail = None):
+    raise fastapi.HTTPException(status_code, detail)

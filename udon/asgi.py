@@ -3,6 +3,7 @@ import email.utils
 import importlib
 import logging
 import os.path
+import socket
 import time
 import traceback
 
@@ -30,13 +31,14 @@ class API:
     def install(self, stack):
         assert self.stack is None
         mount_point = os.path.join(stack.prefix, self.prefix)
-        if not mount_point.endswith('/'):
-            mount_point += '/'
+        if not mount_point.endswith("/"):
+            mount_point += "/"
         app = stack.app_factory()
         self.setup(app)
         stack.app.mount(mount_point, self)
         self.app = app
         self.stack = stack
+        self.stack.on_before_shutdown(self.app.before_shutdown)
 
     async def __call__(self, scope, receive = None, send = None):
         return await self.app(scope, receive, send)
@@ -70,6 +72,12 @@ class APIStack:
     def on_shutdown(self, method):
         self.app.on_shutdown(method)
 
+    def on_before_shutdown(self, method):
+        self.app.on_before_shutdown(method)
+
+    def before_shutdown(self):
+        self.app.before_shutdown()
+
     def add_middleware(self, cls, **args):
         self.app.add_middleware(cls, **args)
         for api in self.apis:
@@ -87,9 +95,12 @@ class APIStack:
 class App(fastapi.FastAPI):
 
     def __init__(self, **kwargs):
+        logging.info(f"[asgi.App] __init__");
+
         kwargs.setdefault("docs_url", None)
         kwargs.setdefault("redoc_url", None)
         fastapi.FastAPI.__init__(self, **kwargs)
+        self.before_shutdown_handlers = set()
 
     def get(self, path, method, **args):
         fastapi.FastAPI.get(self, path, **args)(method)
@@ -118,6 +129,17 @@ class App(fastapi.FastAPI):
     def on_shutdown(self, method):
         fastapi.FastAPI.on_event(self, "shutdown")(method)
 
+    def on_before_shutdown(self, method):
+        self.before_shutdown_handlers.add(method)
+
+        logging.info(f"[asgi.App] on_before_shutdown: {len(self.before_shutdown_handlers)} handlers");
+
+    def before_shutdown(self):
+        logging.info(f"[asgi.App] before_shutdown: {len(self.before_shutdown_handlers)} handlers");
+
+        for handler in self.before_shutdown_handlers:
+            handler()
+
     # def add_middleware(self, cls, **args):
     #     self.add_middleware(cls, **args)
 
@@ -140,6 +162,18 @@ def format_exception(exc):
     return "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
 
 
+class Config(uvicorn.Config):
+    pass
+
+
+class Server(uvicorn.Server):
+    async def shutdown(self, sockets: list[socket.socket] | None = None) -> None:
+        logging.info("[asgi.Server] shutdown");
+
+        self.config.app.before_shutdown()
+        await uvicorn.Server.shutdown(self, sockets)
+
+
 def run(app, **kwargs):
     # Use proxy headers to hydrate request
     kwargs.setdefault("proxy_headers", True)
@@ -148,9 +182,12 @@ def run(app, **kwargs):
     # Prevent uvicorn from patching logging
     kwargs.setdefault("log_config", None)
 
+    config = Config(app, **kwargs)
+    server = Server(config)
+
     try:
-        uvicorn.run(app, **kwargs)
-    except SystemExit:
+        server.run()
+    except (SystemExit, KeyboardInterrupt):
         pass
     except:  # noqa: E722
         logging.exception("EXCEPTION")
@@ -220,7 +257,6 @@ def streaming(request: fastapi.Request, size: int, fd, timestamp: int = None, et
             # An Etag containing the mtime is pretty much useless, should be a real file hash.
             # TODO: use info.CRC from ZipInfo, and swift object MD5
             "Etag": etag,
-            "Server": "Omnibook (uvicorn)",
             **headers})
 
 
@@ -230,6 +266,10 @@ def not_found(detail = None):
 
 def json(data):
     return fastapi.responses.JSONResponse(data)
+
+
+def ok():
+    return fastapi.responses.Response(status_code=fastapi.status.HTTP_204_NO_CONTENT)
 
 
 def parse_range(request: fastapi.Request, size):

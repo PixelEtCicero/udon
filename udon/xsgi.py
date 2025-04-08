@@ -1,3 +1,7 @@
+import base64
+import datetime
+import logging
+import os
 import time
 
 
@@ -69,7 +73,7 @@ def response_view(view, request, response_headers = {}):
             # interrupted transfer
             pass
         except:
-            _logger(logger).exception("EXCEPTION")
+            logging.exception("EXCEPTION")
             raise
         finally:
             body.close()
@@ -155,12 +159,17 @@ class Form(object):
 
 _mandatory = object()
 _unset = object()
+
+
 class Parameters(object):
 
     def __init__(self, params):
         if not isinstance(params, dict):
-            abort(400, 'Expect parameter object')
+            self.abort(400, 'Expect parameter object')
         self.params = params
+
+    def abort(status_code, detail):
+        raise NotImplementedError()
 
     def __enter__(self):
         return self
@@ -168,7 +177,7 @@ class Parameters(object):
     def __exit__(self, type, value, traceback):
         if (type, value, traceback) == (None, None, None):
             if self.params:
-                abort(400, 'Unexpected parameter(s): %s' % ', '.join(self.params.keys()))
+                self.abort(400, 'Unexpected parameter(s): %s' % ', '.join(self.params.keys()))
 
     def get(self, name, default, validate):
         value = self.params.pop(name, _unset)
@@ -176,15 +185,15 @@ class Parameters(object):
         if value is _unset:
             if default is not _mandatory:
                 return default
-            abort(400, 'Missing parameter %s' % (name, ))
+            self.abort(400, 'Missing parameter %s' % (name, ))
 
         if validate:
             try:
                 validate(value)
             except TypeError as e:
-                abort(400, 'Invalid parameter type: %s: %s' % (name, str(e)))
+                self.abort(400, 'Invalid parameter type: %s: %s' % (name, str(e)))
             except ValueError as e:
-                abort(400, 'Invalid parameter value: %s: %s' % (name, str(e)))
+                self.abort(400, 'Invalid parameter value: %s: %s' % (name, str(e)))
         return value
 
     def get_list(self, name, default, validate, maxlen):
@@ -254,8 +263,7 @@ class Parameters(object):
                 raise TypeError('expect boolean')
         return self.get(name, default, _)
 
-    def string_list(self, name, default = _mandatory, maxlen = None, choice = None, validate =
- None):
+    def string_list(self, name, default = _mandatory, maxlen = None, choice = None, validate = None):
         def _(v):
             if not isinstance(v, str):
                 raise TypeError('expect list of strings')

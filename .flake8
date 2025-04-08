@@ -1,0 +1,14 @@
+[flake8]
+ignore=
+    # line too long
+    E501
+    # unexpected spaces around keyword / parameter equals
+    E251
+    # except all
+    E722
+    # Line-breaks and binary operators. We choose W504 (new recommend), thus ignore W503
+    W503
+    # Imports at top of module (sometimes we want to do omnibook.config.setup() before importing new modules)
+    E402
+    # Flake 8 requires a whitespace after a keyword (like "import") but also considers "del" a keyword
+    E275

@@ -2,24 +2,25 @@ from contextvars import ContextVar
 import datetime
 import email.utils
 import importlib
+import inspect
 import logging
 import os.path
 import socket
 import time
-import typing
 
 import fastapi
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from starlette.requests import ClientDisconnect
-from starlette.types import ASGIApp, Receive, Scope, Send
+from starlette.types import Receive, Scope, Send
 import uvicorn
 
 import udon.xsgi
 
 
 _apis = {}
+
+
 def api(path):
     def _(setup):
         _apis[setup] = API(path, setup)
@@ -115,7 +116,6 @@ class App(fastapi.FastAPI):
         fastapi.FastAPI.get(self, path, **args)(method)
 
         # autohead
-        import inspect
         async def wrapper(**args):
             response = await method(**args)
             if response.status_code == 200:
@@ -215,6 +215,7 @@ CONTEXTS = ContextVar("udon")
 
 # default request when outside of api route (mimics bottle behavior)
 CONTEXTS.set({"request": fastapi.Request(scope={"type": "http", "headers": {}})})
+
 
 # per route request set by middleware
 async def context_http_middleware(request: fastapi.Request, call_next):
@@ -474,7 +475,7 @@ class Form(udon.xsgi.Form):
 
     def __init__(self, request = None):
         if request is None:
-            request = bottle.request
+            request = _request
         udon.xsgi.Form.__init__(request)
 
 

@@ -1,3 +1,4 @@
+from contextvars import ContextVar
 import datetime
 import email.utils
 import importlib
@@ -5,11 +6,17 @@ import logging
 import os.path
 import socket
 import time
-import traceback
+import typing
 
 import fastapi
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+from starlette.requests import ClientDisconnect
 from starlette.types import ASGIApp, Receive, Scope, Send
 import uvicorn
+
+import udon.xsgi
 
 
 _apis = {}
@@ -47,6 +54,9 @@ class API:
 class APIStack:
 
     def __init__(self, prefix = "/", **options):
+        options.setdefault("exception_handlers", {
+            Exception: handle_error,
+        })
         self.prefix = prefix
         self.options = options
         self.app = self.app_factory()
@@ -95,15 +105,25 @@ class APIStack:
 class App(fastapi.FastAPI):
 
     def __init__(self, **kwargs):
-        logging.info(f"[asgi.App] __init__");
-
         kwargs.setdefault("docs_url", None)
         kwargs.setdefault("redoc_url", None)
+        kwargs.setdefault("debug", False)
         fastapi.FastAPI.__init__(self, **kwargs)
         self.before_shutdown_handlers = set()
 
     def get(self, path, method, **args):
         fastapi.FastAPI.get(self, path, **args)(method)
+
+        # autohead
+        import inspect
+        async def wrapper(**args):
+            response = await method(**args)
+            if response.status_code == 200:
+                return Response(status_code=response.status_code,
+                                headers=response.headers)
+            return response
+        wrapper.__signature__ = inspect.signature(method)
+        fastapi.FastAPI.head(self, path, **args)(wrapper)
 
     def post(self, path, method, **args):
         fastapi.FastAPI.post(self, path, **args)(method)
@@ -132,34 +152,18 @@ class App(fastapi.FastAPI):
     def on_before_shutdown(self, method):
         self.before_shutdown_handlers.add(method)
 
-        logging.info(f"[asgi.App] on_before_shutdown: {len(self.before_shutdown_handlers)} handlers");
-
     def before_shutdown(self):
-        logging.info(f"[asgi.App] before_shutdown: {len(self.before_shutdown_handlers)} handlers");
-
         for handler in self.before_shutdown_handlers:
             handler()
-
-    # def add_middleware(self, cls, **args):
-    #     self.add_middleware(cls, **args)
 
     def add_http_middleware(self, method, **args):
         fastapi.FastAPI.middleware(self, "http")(method, **args)
 
-    # TODO: follow asgi best practice for error handling
     async def __call__(self, scope: Scope, receive = Receive, send = Send):
         try:
             return await fastapi.FastAPI.__call__(self, scope, receive, send)
         except Exception as exc:
-            logging.error(format_exception(exc))
-            raise
-
-
-def format_exception(exc):
-    """
-    Format exception to string
-    """
-    return "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+            logging.exception(exc)
 
 
 class Config(uvicorn.Config):
@@ -168,10 +172,12 @@ class Config(uvicorn.Config):
 
 class Server(uvicorn.Server):
     async def shutdown(self, sockets: list[socket.socket] | None = None) -> None:
-        logging.info("[asgi.Server] shutdown");
-
         self.config.app.before_shutdown()
         await uvicorn.Server.shutdown(self, sockets)
+
+
+async def handle_error(request: fastapi.Request, exc: Exception):
+    return response_json({"detail": str(exc)}, status_code=500)
 
 
 def run(app, **kwargs):
@@ -179,8 +185,15 @@ def run(app, **kwargs):
     kwargs.setdefault("proxy_headers", True)
     # Do not put uvicorn server header in all responses
     kwargs.setdefault("server_header", False)
-    # Prevent uvicorn from patching logging
-    kwargs.setdefault("log_config", None)
+    # Default is to disable all logging and use udon.asgi.log_http_middleware
+    # Disable uvicorn error log
+    kwargs.setdefault("log_config", {
+        "version": 1,
+        "level": "NOTSET",
+        "handlers": "",
+    })
+    # Disable uvicorn access log
+    kwargs.setdefault("access_log", False)
 
     config = Config(app, **kwargs)
     server = Server(config)
@@ -191,6 +204,55 @@ def run(app, **kwargs):
         pass
     except:  # noqa: E722
         logging.exception("EXCEPTION")
+
+
+###
+# request
+###
+
+
+CONTEXTS = ContextVar("udon")
+
+# default request when outside of api route (mimics bottle behavior)
+CONTEXTS.set({"request": fastapi.Request(scope={"type": "http", "headers": {}})})
+
+# per route request set by middleware
+async def context_http_middleware(request: fastapi.Request, call_next):
+    context = CONTEXTS.set({"request": request})
+    response = await call_next(request)
+    CONTEXTS.reset(context)
+
+    return response
+
+
+class LocalRequest():
+    def __getattr__(self, name):
+        return getattr(CONTEXTS.get()["request"], name)
+
+
+# thread safe accessor for the *current* fastapi.Request
+request = LocalRequest()
+_request = request
+
+
+###
+# responses
+###
+
+
+Response = fastapi.responses.Response
+
+
+def response_json(data, status_code = 200):
+    return fastapi.responses.JSONResponse(jsonable_encoder(data), status_code=status_code)
+
+
+def response_ok(status_code = fastapi.status.HTTP_204_NO_CONTENT):
+    return fastapi.responses.Response(status_code=status_code)
+
+
+def abort(status_code, detail = None):
+    raise fastapi.HTTPException(status_code, detail)
 
 
 async def request_to_stream_generator(req):
@@ -260,18 +322,6 @@ def streaming(request: fastapi.Request, size: int, fd, timestamp: int = None, et
             **headers})
 
 
-def not_found(detail = None):
-    raise fastapi.HTTPException(404, detail)
-
-
-def json(data):
-    return fastapi.responses.JSONResponse(data)
-
-
-def ok():
-    return fastapi.responses.Response(status_code=fastapi.status.HTTP_204_NO_CONTENT)
-
-
 def parse_range(request: fastapi.Request, size):
     value = request.headers.get("Range", "")
     if not value.startswith("bytes="):
@@ -321,8 +371,8 @@ def iter_range_chunk(fp, count, bufsize = 1024 * 1024):
         count -= len(data)
 
 
-def client_ip(request):
-    return request.client.host or request.headers.get("x-forwarded-for")
+def client_ip(request = _request):
+    return request.client.host if request.client is not None else request.headers.get("x-forwarded-for")
 
 
 def formatdate(ts):
@@ -412,5 +462,65 @@ def access_control_headers(method = "GET", origin = None, headers = []):
     }
 
 
-def abort(status_code, detail = None):
-    raise fastapi.HTTPException(status_code, detail)
+###
+# Expose pydantic model & wsgi params
+###
+
+
+Params = BaseModel
+
+
+class Form(udon.xsgi.Form):
+
+    def __init__(self, request = None):
+        if request is None:
+            request = bottle.request
+        udon.xsgi.Form.__init__(request)
+
+
+class Parameters(udon.xsgi.Parameters):
+
+    def abort(status_code, detail):
+        abort(status_code, detail)
+
+
+async def params(request = _request):
+    return Parameters(await _request_json(request) or {})
+
+
+async def _request_json(request):
+    try:
+        return await request.json()
+    except ValueError:
+        abort(400, "Invalid JSON content")
+
+
+###
+# udon.content bridge
+###
+
+
+def response_content(fp, public = False, max_age = 0):
+    view = udon.xsgi.ResourceView(fp,
+                                  fp.info.size,
+                                  fp.info.timestamp,
+                                  ctype=fp.info.ctype,
+                                  etag=fp.info.etag)
+    response = response_view(view)
+
+    visibility = "public" if public else "private"
+    caching = "max-age={max_age}, must-revalidate" if max_age else "no-cache"
+    response.headers["Cache-Control"] = f"{visibility}, {caching}"
+
+    return response
+
+
+def response_view(view, request = None, response_headers = {}):
+    if request is None:
+        request = _request
+
+    (status_code, headers, body) = udon.xsgi.response_view(view, request, response_headers)
+
+    return StreamingResponse(content=body,
+                             status_code=status_code,
+                             headers=headers)

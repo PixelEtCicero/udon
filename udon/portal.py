@@ -19,6 +19,7 @@ import json
 import threading
 import time
 
+import aiohttp
 import requests
 
 import udon.util
@@ -54,7 +55,9 @@ class InvalidCredentials(AuthError):
 class ExpiredCredentials(AuthError):
     pass
 
+
 HTTPError = requests.exceptions.HTTPError
+AsyncHTTPError = aiohttp.client_exceptions.ClientResponseError
 
 
 class ExpireCache:
@@ -148,6 +151,62 @@ class Portal:
         raise InvalidCredentials("Invalid authorization scheme")
 
 
+class AsyncPortal:
+
+    def __init__(self):
+        self.cache = ExpireCache()
+
+    async def user_noauth(self, request):
+        raise AuthRequired("Authorization required")
+
+    async def user_public(self, request):
+        raise AuthRequired("Authorization required")
+
+    async def user_bearer(self, request, access_token, jwt):
+        raise NotImplementedError
+
+    async def user_apikey(self, request, access_token):
+        raise NotImplementedError
+
+    async def user(self, request, insecure = False):
+        auth = request.headers.get("Authorization")
+        if not auth:
+            return await self.user_public(request) if insecure else await self.user_noauth(request)
+
+        parts = auth.split(' ', 1)
+        scheme = parts[0]
+
+        if scheme == 'Public':
+            return await self.user_public(request)
+
+        if len(parts) < 2:
+            raise InvalidCredentials("Invalid authorization header")
+
+        access_token = parts[1].strip()
+
+        if scheme == 'Bearer':
+            try:
+                return self.cache.get(access_token)
+            except KeyError:
+                try:
+                    jwt = parse_jwt(access_token)
+                    timeout = jwt['content']['exp']
+                except:
+                    raise InvalidCredentials("Invalid authorization token")
+
+            if timeout <= time.time():
+                raise ExpiredCredentials(access_token)
+
+            user = await self.user_bearer(request, access_token, jwt)
+            self.cache.set(access_token, user, timeout)
+            return user
+
+        if scheme == 'ApiKey':
+            return await self.user_apikey(request, access_token)
+
+        raise InvalidCredentials("Invalid authorization scheme")
+
+
 class OpenIDClient:
 
     def __init__(self, host, realm, client_id, client_secret, verify = True, scope = 'openid'):
@@ -188,6 +247,54 @@ class OpenIDClient:
 
     def userinfo(self, access_token):
         return self._request('GET', 'userinfo', headers = { 'Authorization': 'Bearer ' + access_token }).json()
+
+
+class AsyncOpenIDClient:
+
+    def __init__(self, host, realm, client_id, client_secret, verify = True, scope = 'openid', session = None):
+        self.verify = verify
+        self.realm = realm
+        self.host = host
+        self.scope = scope
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self.scope = scope
+        self.session = session or aiohttp.ClientSession(raise_for_status=True)
+
+    async def release(self):
+        await self.session.close()
+
+    def _url(self, action):
+        return "%s/auth/realms/%s/protocol/openid-connect/%s" % (self.host, self.realm, action)
+
+    async def _request(self, method, action, data = None, headers = None):
+        return await self.session.request(method=method, url=self._url(action), data=data, headers=headers)
+
+    async def login(self, username, password):
+        response = await self._request('POST', 'token', data = { 'client_id': self.client_id,
+                                                                 'client_secret': self.client_secret,
+                                                                 'scope': self.scope,
+                                                                 'grant_type': 'password',
+                                                                 'username': username,
+                                                                 'password': password })
+        return await response.json()
+
+    async def refresh(self, refresh_token):
+        response = await self._request('POST', 'token', data = { 'client_id': self.client_id,
+                                                                 'client_secret': self.client_secret,
+                                                                 'grant_type': 'refresh_token',
+                                                                 'refresh_token': refresh_token })
+        return await response.json()
+
+    async def logout(self, refresh_token):
+        response = await self._request('POST', 'logout', data = { 'client_id': self.client_id,
+                                                              'client_secret': self.client_secret,
+                                                              'refresh_token': refresh_token })
+        return response.status == 204
+
+    async def userinfo(self, access_token):
+        response = await self._request('GET', 'userinfo', headers = { 'Authorization': 'Bearer ' + access_token })
+        return await response.json()
 
 
 class Session:
@@ -242,6 +349,71 @@ class Session:
 
     def _refresh(self):
         grant = self.client.refresh(self.grant['refresh_token'])
+        self._granted(grant)
+
+    def _granted(self, grant):
+        access_timeout = parse_jwt(grant['access_token'])['content']['exp']
+        refresh_timeout = parse_jwt(grant['refresh_token'])['content'].get('exp')
+        self.grant = grant
+        self.access_timeout = access_timeout + self.access_dt
+        self.refresh_timeout = refresh_timeout + self.refresh_dt if refresh_timeout else 0
+
+
+class AsyncSession:
+
+    grant = None
+    refresh_timeout = None
+    access_timeout = None
+
+    def __init__(self, client, username, password,
+                 lock = None, access_dt = 0, refresh_dt = 0):
+        self.client = client
+        self.username = username
+        self.password = password
+        self.access_dt = access_dt
+        self.refresh_dt = refresh_dt
+        if lock is None:
+            lock = udon.util.nullcontext()
+        elif lock is True:
+            lock = threading.Lock()
+        self.lock = lock
+
+    async def release(self):
+        await self.client.release()
+
+    async def token(self):
+        # Make sure two threads do not try to login/refresh a token at the same time.
+        with self.lock:
+            if not self.grant:
+                await self._login()
+            elif self.access_timeout < time.time():
+                if self.refresh_timeout > time.time():
+                    await self._refresh()
+                else:
+                    self._clear()
+                    await self._login()
+            return self.grant['access_token']
+
+    async def logout(self):
+        if not self.grant:
+            return
+        grant, timeout = self.grant, self.refresh_timeout
+        self._clear()
+        if grant and time.time() < timeout:
+            # XXX fail-safe
+            await self.client.logout(grant['refresh_token'])
+
+    def _clear(self):
+        del self.grant
+        del self.access_timeout
+        del self.refresh_timeout
+
+    async def _login(self):
+        grant = await self.client.login(self.username, self.password)
+        self._granted(grant)
+
+    async def _refresh(self):
+        grant = await self.client.refresh(self.grant['refresh_token'])
         self._granted(grant)
 
     def _granted(self, grant):

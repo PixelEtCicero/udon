@@ -25,6 +25,8 @@ import time
 
 import bottle
 
+import udon.xsgi
+
 
 def _logger(logger):
     return logger if logger is not None else logging.getLogger(__name__)
@@ -191,166 +193,19 @@ def abort(code, message):
     bottle.abort(code, message)
 
 
-class Form(object):
+class Form(udon.xsgi.Form):
 
     def __init__(self, request = None):
         if request is None:
             request = bottle.request
-        self.request = request
+        udon.xsgi.Form.__init__(request)
 
-    def raw(self, name):
-        return self.request.forms.get(name)
 
-    def string(self, name):
-        return self.raw(name)
+class Parameters(udon.xsgi.Parameters):
 
-    def integer(self, name):
-        return int(self.raw(name))
+    def abort(status_code, detail):
+        abort(status_code, detail)
 
-    def float(self, name):
-        return float(self.raw(name))
-
-    def date(self, name, fmt = "%d/%m/%Y"):
-        return datetime.datetime.strptime(self.raw(name), fmt)
-
-    def file(self, name):
-        if name not in self.request.files:
-            return None, None
-        value = self.request.files[name]
-        filename = os.path.basename(value.filename)
-        return value.file, filename
-
-_mandatory = object()
-_unset = object()
-class Parameters(object):
-
-    def __init__(self, params):
-        if not isinstance(params, dict):
-            abort(400, 'Expect parameter object')
-        self.params = params
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, type, value, traceback):
-        if (type, value, traceback) == (None, None, None):
-            if self.params:
-                abort(400, 'Unexpected parameter(s): %s' % ', '.join(self.params.keys()))
-
-    def get(self, name, default, validate):
-        value = self.params.pop(name, _unset)
-
-        if value is _unset:
-            if default is not _mandatory:
-                return default
-            abort(400, 'Missing parameter %s' % (name, ))
-
-        if validate:
-            try:
-                validate(value)
-            except TypeError as e:
-                abort(400, 'Invalid parameter type: %s: %s' % (name, str(e)))
-            except ValueError as e:
-                abort(400, 'Invalid parameter value: %s: %s' % (name, str(e)))
-        return value
-
-    def get_list(self, name, default, validate, maxlen):
-        def _(v):
-            if not isinstance(v, list):
-                raise TypeError('expect list')
-            if maxlen is not None and len(v) > maxlen:
-                raise ValueError('list too long')
-            if validate:
-                for e in v:
-                    validate(e)
-        return self.get(name, default, _)
-
-    def any(self, name, default = _mandatory, validate = None):
-        return self.get(name, default, validate)
-
-    def string(self, name, default = _mandatory, choice = None, validate = None):
-        def _(v):
-            if not isinstance(v, str):
-                raise TypeError('expect string')
-            if choice is not None and v not in choice:
-                raise ValueError('not in set of possible values')
-            if validate:
-                validate(v)
-        return self.get(name, default, _)
-
-    def binary(self, name, default = _mandatory, maxlen = None, validate = None):
-        def _(v):
-            if not isinstance(v, str):
-                raise TypeError('expect base64 string')
-            if maxlen is not None and len(v) > maxlen * 4:
-                raise ValueError('too long')
-        v = self.get(name, default, _)
-        try:
-            v = base64.b64decode(v)
-        except:
-            raise ValueError('not properly base64-encoded')
-        if maxlen is not None and len(v) > maxlen:
-            raise ValueError('too long')
-        if validate:
-            validate(v)
-        return v
-
-    def integer(self, name, default = _mandatory, min = None, max = None):
-        def _(v):
-            if not isinstance(v, int):
-                raise TypeError('expect integer')
-            if min is not None and v < min:
-                raise ValueError('too small')
-            if max is not None and v > max:
-                raise ValueError('too large')
-        return self.get(name, default, _)
-
-    def float(self, name, default = _mandatory, min = None, max = None):
-        def _(v):
-            if not isinstance(v, float):
-                raise TypeError('expect float')
-            if min is not None and v < min:
-                raise ValueError('too small')
-            if max is not None and v > max:
-                raise ValueError('too large')
-        return self.get(name, default, _)
-
-    def boolean(self, name, default = _mandatory):
-        def _(v):
-            if not isinstance(v, bool):
-                raise TypeError('expect boolean')
-        return self.get(name, default, _)
-
-    def string_list(self, name, default = _mandatory, maxlen = None, choice = None, validate =
- None):
-        def _(v):
-            if not isinstance(v, str):
-                raise TypeError('expect list of strings')
-            if choice is not None and v not in choice:
-                raise ValueError('not in set of possible values')
-            if validate:
-                validate(v)
-        return self.get_list(name, default, _, maxlen)
-
-    def integer_list(self, name, default = _mandatory, maxlen = None):
-        def _(v):
-            if not isinstance(v, int):
-                raise TypeError('expect list of integers')
-        return self.get_list(name, default, _, maxlen)
-
-    def any_list(self, name, default = _mandatory, validate = None, maxlen = None):
-        return self.get_list(name, default, validate, maxlen)
-
-    def timestamp(self, name, default = _mandatory, min = 0, max = None):
-        if max is None:
-            max = int(time.time()) + 3600 * 24 * 365
-        return self.integer(name, default, min = min, max = max)
-
-    def email(self, name, default = _mandatory):
-        v = self.string(name, default)
-        if v is not None:
-            # XXX validate email?
-            return v.strip().lower()
 
 def _request_json(request):
     try:
@@ -371,11 +226,6 @@ def no_params(request = None):
     if _request_json(request):
         abort(400, 'No parameter expected')
 
-def _fmt_time(timestamp = None):
-    if timestamp is None:
-        timestamp = time.time()
-    return time.strftime("%a, %d %b %Y %H:%M:%S GMT", time.gmtime(timestamp))
-
 def _make_etag(*parts):
     hash = hashlib.sha1()
     for part in parts:
@@ -395,115 +245,17 @@ def response_json(value):
     return response
 
 
-class ResourceView:
-
-    def __init__(self, body, size, mtime, ctype = None, etag = None):
-        self.body = body
-        self.ctype = ctype if ctype is not None else 'application/octet-stream'
-        self.size = size
-        self.mtime = mtime
-        self.etag = etag
-
-
 def response_view(view, request = None, response_headers = {}):
     if request is None:
         request = bottle.request
 
-    def _parse_range():
-        value = request.environ.get('HTTP_RANGE', '')
-        if not value.startswith("bytes="):
-            return None
+    (status_code, headers, body) = udon.xsgi.response_view(view, request, response_headers)
 
-        for rng in value.split("=", 1)[1].split(","):
-            if '-' not in rng:
-                continue
-            offset, end = rng.split('-', 1)
-            if (offset, end) == ('', ''):
-                continue
-            if not offset:
-                offset, end = max(0, view.size - int(end) + 1), view.size
-            elif not end:
-                offset, end = int(offset), view.size
-            else:
-                offset, end = int(offset), int(end) + 1
-            if 0 <= offset < end <= view.size:
-                return offset, end
-
-        return None
-
-    def _modified():
-        return True
-
-    def _read(fp, count, bufsize = 1024 * 1024):
-        while count:
-            data = fp.read(min(count, bufsize))
-            if not data:
-                break
-            yield data
-            count -= len(data)
-
-    def _iter_range(body, offset, count, logger):
-        try:
-            if (offset):
-                if body.seekable():
-                    body.seek(offset, 1)
-                else:
-                    for _ in _read(body, offset):
-                        pass
-            for chunk in _read(body, count):
-                yield chunk
-        except GeneratorExit:
-            # interrupted transfer
-            pass
-        except:
-            _logger(logger).exception("EXCEPTION")
-            raise
-        finally:
-            body.close()
-
-    range = _parse_range()
-
-    response = bottle.response.copy(cls = bottle.HTTPResponse)
-    response.set_header("Accept-Ranges", "bytes")
-    response.set_header("Content-Type", view.ctype)
-    if isinstance(view.mtime, str):
-        response.set_header("Last-Modified", view.mtime)
-    else:
-        response.set_header("Last-Modified", _fmt_time(view.mtime))
-    if view.etag is not None:
-        # XXX not if Range?
-        response.set_header("ETag", view.etag)
-
-    if request.method == "HEAD":
-        response.set_header("Content-Length", view.size)
-        view.body.close()
-    elif not _modified():
-        response.set_header("Content-Length", 0)
-        response.status = "304 Not modified"
-        view.body.close()
-    elif range:
-        offset, end = range
-        length = end - offset
-        response.set_header("Content-Length", length)
-        response.set_header("Content-Range",  "bytes %d-%d/%d" % (offset, end - 1, view.size))
-        # HTTP clients often try to detect if a server supports partial content.
-        # A common way to do this without wasting resources is to request a range
-        # that represents the whole file. In this case, the recommendation from HTTP
-        # is to respond with a 200 status to be consistant with the way HTTP caches work.
-        # And clients should base the detection on the Accept-ranges/Content-Range headers
-        # rather than the status.
-        # Another reason to response 200: if a browser (chrome) receives a 206 response, which Content-Range
-        # matches the Content-Length, it will consider the response valid for a subsequent GET
-        # request WITHOUT range header, and this is counter-intuitive from the client point-of-view
-        # to receive 206 status on a simple GET request.
-        response.status = "206 Partial Content" if view.size > length else "200 OK"
-        response.body = _iter_range(view.body, offset, end - offset, None)
-    else:
-        response.set_header("Content-Length", view.size)
-        response.body = view.body
-
-    for key in response_headers:
-        response.set_header(key, response_headers[key])
+    response = bottle.response.copy(cls=bottle.HTTPResponse)
+    response.status = status_code
+    for key in headers: 
+        response.set_header(key, headers[key])
+    response.body = body
 
     return response
 
@@ -515,21 +267,21 @@ def response_file(path, ctype = None, etag = None):
         etag = _make_etag(path, stat.st_size, stat.st_mtime)
     if ctype is None:
         ctype = guess_content_type(path)
-    view = ResourceView(fp,
-                        stat.st_size,
-                        stat.st_mtime,
-                        ctype = ctype,
-                        etag = etag)
+    view = udon.xsgi.ResourceView(fp,
+                                  stat.st_size,
+                                  stat.st_mtime,
+                                  ctype = ctype,
+                                  etag = etag)
     return response_view(view)
 
 
 def response_content(fp):
     headers = { key: val for key, val in fp.info.headers }
-    view = ResourceView(fp,
-                        fp.info.size,
-                        fp.info.timestamp,
-                        ctype = headers.get("Content-Type"),
-                        etag = headers.get('ETag'))
+    view = udon.xsgi.ResourceView(fp,
+                                  fp.info.size,
+                                  fp.info.timestamp,
+                                  ctype = headers.get("Content-Type"),
+                                  etag = headers.get('ETag'))
     return response_view(view)
 
 

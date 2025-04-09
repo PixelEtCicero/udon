@@ -3,6 +3,7 @@ import datetime
 import email.utils
 import importlib
 import inspect
+import json
 import logging
 import os.path
 import socket
@@ -56,12 +57,16 @@ class APIStack:
 
     def __init__(self, prefix = "/", **options):
         options.setdefault("exception_handlers", {
-            Exception: handle_error,
+            Exception: self.handle_error,
         })
         self.prefix = prefix
         self.options = options
         self.app = self.app_factory()
         self.apis = []
+
+    async def handle_error(self, request: fastapi.Request, exc: Exception):
+        logging.error(str(exc))
+        return response_json({"detail": str(exc)}, status_code=500)
 
     def app_factory(self):
         return App(**self.options)
@@ -174,10 +179,6 @@ class Server(uvicorn.Server):
     async def shutdown(self, sockets: list[socket.socket] | None = None) -> None:
         self.config.app.before_shutdown()
         await uvicorn.Server.shutdown(self, sockets)
-
-
-async def handle_error(request: fastapi.Request, exc: Exception):
-    return response_json({"detail": str(exc)}, status_code=500)
 
 
 def run(app, **kwargs):
@@ -490,9 +491,14 @@ async def params(request = _request):
 
 
 async def _request_json(request):
+    # wsgi BC: allow empty body
+    body = await request.body()
+    if not body:
+        return {}
+
     try:
-        return await request.json()
-    except ValueError:
+        return json.loads(body)
+    except json.decoder.JSONDecodeError:
         abort(400, "Invalid JSON content")
 
 

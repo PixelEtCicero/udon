@@ -203,7 +203,7 @@ class Form(udon.xsgi.Form):
 
 class Parameters(udon.xsgi.Parameters):
 
-    def abort(status_code, detail):
+    def abort(self, status_code, detail):
         abort(status_code, detail)
 
 

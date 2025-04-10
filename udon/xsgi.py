@@ -168,7 +168,7 @@ class Parameters(object):
             self.abort(400, 'Expect parameter object')
         self.params = params
 
-    def abort(status_code, detail):
+    def abort(self, status_code, detail):
         raise NotImplementedError()
 
     def __enter__(self):

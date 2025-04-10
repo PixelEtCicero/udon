@@ -43,10 +43,13 @@ class API:
         if not mount_point.endswith("/"):
             mount_point += "/"
         app = stack.app_factory()
+        # shared app state
+        app.state = stack.app.state
         self.setup(app)
         stack.app.mount(mount_point, self)
         self.app = app
         self.stack = stack
+        # propagate shutdown
         self.stack.on_before_shutdown(self.app.before_shutdown)
 
     async def __call__(self, scope, receive = None, send = None):
@@ -117,52 +120,52 @@ class App(fastapi.FastAPI):
         fastapi.FastAPI.__init__(self, **kwargs)
         self.before_shutdown_handlers = set()
 
-    def get(self, path, method, **args):
-        fastapi.FastAPI.get(self, path, **args)(method)
+    def get(self, path, endpoint, **args):
+        fastapi.FastAPI.get(self, path, **args)(endpoint)
 
         # autohead
         async def wrapper(**args):
-            response = await method(**args)
+            response = await endpoint(**args)
             if response.status_code == 200:
                 return Response(status_code=response.status_code,
                                 headers=response.headers)
             return response
-        wrapper.__signature__ = inspect.signature(method)
+        wrapper.__signature__ = inspect.signature(endpoint)
         fastapi.FastAPI.head(self, path, **args)(wrapper)
 
-    def post(self, path, method, **args):
-        fastapi.FastAPI.post(self, path, **args)(method)
+    def post(self, path, endpoint, **args):
+        fastapi.FastAPI.post(self, path, **args)(endpoint)
 
-    def put(self, path, method, **args):
-        fastapi.FastAPI.put(self, path, **args)(method)
+    def put(self, path, endpoint, **args):
+        fastapi.FastAPI.put(self, path, **args)(endpoint)
 
-    def patch(self, path, method, **args):
-        fastapi.FastAPI.patch(self, path, **args)(method)
+    def patch(self, path, endpoint, **args):
+        fastapi.FastAPI.patch(self, path, **args)(endpoint)
 
-    def head(self, path, method, **args):
-        fastapi.FastAPI.head(self, path, **args)(method)
+    def head(self, path, endpoint, **args):
+        fastapi.FastAPI.head(self, path, **args)(endpoint)
 
-    def delete(self, path, method, **args):
-        fastapi.FastAPI.delete(self, path, **args)(method)
+    def delete(self, path, endpoint, **args):
+        fastapi.FastAPI.delete(self, path, **args)(endpoint)
 
-    def options(self, path, method, **args):
-        fastapi.FastAPI.options(self, path, **args)(method)
+    def options(self, path, endpoint, **args):
+        fastapi.FastAPI.options(self, path, **args)(endpoint)
 
-    def on_startup(self, method):
-        fastapi.FastAPI.on_event(self, "startup")(method)
+    def on_startup(self, endpoint):
+        fastapi.FastAPI.on_event(self, "startup")(endpoint)
 
-    def on_shutdown(self, method):
-        fastapi.FastAPI.on_event(self, "shutdown")(method)
+    def on_shutdown(self, endpoint):
+        fastapi.FastAPI.on_event(self, "shutdown")(endpoint)
 
-    def on_before_shutdown(self, method):
-        self.before_shutdown_handlers.add(method)
+    def on_before_shutdown(self, endpoint):
+        self.before_shutdown_handlers.add(endpoint)
 
     def before_shutdown(self):
         for handler in self.before_shutdown_handlers:
             handler()
 
-    def add_http_middleware(self, method, **args):
-        fastapi.FastAPI.middleware(self, "http")(method, **args)
+    def add_http_middleware(self, endpoint, **args):
+        fastapi.FastAPI.middleware(self, "http")(endpoint, **args)
 
     async def __call__(self, scope: Scope, receive = Receive, send = Send):
         try:
@@ -482,7 +485,7 @@ class Form(udon.xsgi.Form):
 
 class Parameters(udon.xsgi.Parameters):
 
-    def abort(status_code, detail):
+    def abort(self, status_code, detail):
         abort(status_code, detail)
 
 
@@ -507,13 +510,13 @@ async def _request_json(request):
 ###
 
 
-def response_content(fp, public = False, max_age = 0):
+def response_content(fp, public = False, max_age = 0, response_headers = {}):
     view = udon.xsgi.ResourceView(fp,
                                   fp.info.size,
                                   fp.info.timestamp,
                                   ctype=fp.info.ctype,
                                   etag=fp.info.etag)
-    response = response_view(view)
+    response = response_view(view, response_headers=response_headers)
 
     visibility = "public" if public else "private"
     caching = "max-age={max_age}, must-revalidate" if max_age else "no-cache"

@@ -1,5 +1,6 @@
 import base64
 import datetime
+import hashlib
 import logging
 import os
 import time
@@ -19,6 +20,23 @@ class ResourceView:
         self.size = size
         self.mtime = mtime
         self.etag = etag
+
+
+class FileResourceView(ResourceView):
+
+    def __init__(self, path, ctype = None, etag = None):
+        fp = open(path, "rb")
+        stat = os.fstat(fp.fileno())
+        if etag is None:
+            etag = make_etag(path, stat.st_size, stat.st_mtime)
+        if ctype is None:
+            ctype = guess_content_type(path)
+        ResourceView.__init__(self,
+                              fp,
+                              stat.st_size,
+                              stat.st_mtime,
+                              ctype = ctype,
+                              etag = etag)
 
 
 def response_view(view, request, response_headers = {}):
@@ -292,3 +310,48 @@ class Parameters(object):
         if v is not None:
             # XXX validate email?
             return v.strip().lower()
+
+
+def make_etag(*parts):
+    hash = hashlib.sha1()
+    for part in parts:
+        hash.update(str(part).encode('utf-8'))
+    return hash.hexdigest()
+
+
+DEFAULT_TYPE = {
+    'aac': 'audio/mp4',
+    'avif': 'image/avif',
+    'css': 'text/css',
+    'flac': 'audio/flac',
+    'gif': 'image/gif',
+    'html': 'text/html',
+    'jpeg': 'image/jpeg',
+    'jpg': 'image/jpeg',
+    'js': 'application/javascript',
+    'json': 'application/json',
+    'm4a': 'audio/mp4',
+    'map': 'application/json',
+    'mp3': 'audio/mpeg',
+    'mp4': 'video/mp4',
+    'oga': 'audio/ogg',
+    'ogg': 'audio/ogg',
+    'ogv': 'video/ogg',
+    'otf': 'application/vnd.ms-opentype',
+    'pdf': 'application/pdf',
+    'png': 'image/png',
+    'svg': 'image/svg+xml',
+    'ttf': 'application/x-font-ttf',
+    'txt': 'text/plain',
+    'wav': 'audio/wav',
+    'webm': 'video/webm',
+    'webp': 'image/webp',
+    'woff': 'application/font-woff',
+    'woff2': 'application/font-woff2',
+    'xhtml': 'application/xhtml+xml',
+}
+
+
+def guess_content_type(filename, default = None):
+    ext = filename.split('.')[-1].lower()
+    return DEFAULT_TYPE.get(ext, default)

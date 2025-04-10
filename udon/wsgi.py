@@ -16,7 +16,6 @@
 
 import base64
 import datetime
-import hashlib
 import importlib
 import json
 import logging
@@ -226,12 +225,6 @@ def no_params(request = None):
     if _request_json(request):
         abort(400, 'No parameter expected')
 
-def _make_etag(*parts):
-    hash = hashlib.sha1()
-    for part in parts:
-        hash.update(str(part).encode('utf-8'))
-    return hash.hexdigest()
-
 
 def response_ok(status = 204):
     response = bottle.response.copy(cls = bottle.HTTPResponse)
@@ -253,7 +246,7 @@ def response_view(view, request = None, response_headers = {}):
 
     response = bottle.response.copy(cls=bottle.HTTPResponse)
     response.status = status_code
-    for key in headers: 
+    for key in headers:
         response.set_header(key, headers[key])
     response.body = body
 
@@ -261,18 +254,7 @@ def response_view(view, request = None, response_headers = {}):
 
 
 def response_file(path, ctype = None, etag = None):
-    fp = open(path, "rb")
-    stat = os.fstat(fp.fileno())
-    if etag is None:
-        etag = _make_etag(path, stat.st_size, stat.st_mtime)
-    if ctype is None:
-        ctype = guess_content_type(path)
-    view = udon.xsgi.ResourceView(fp,
-                                  stat.st_size,
-                                  stat.st_mtime,
-                                  ctype = ctype,
-                                  etag = etag)
-    return response_view(view)
+    return response_view(udon.xsgi.FileResourceView(path, ctype=ctype, etag=etag))
 
 
 def response_content(fp):
@@ -299,40 +281,3 @@ def response_request(req, response_headers = {}):
 
     response.body = req.raw
     return response
-
-
-DEFAULT_TYPE = {
-    'mp3': 'audio/mpeg',
-    'mp4': 'video/mp4',
-    'aac': 'audio/mp4',
-    'webm': 'video/webm',
-    'oga': 'audio/ogg',
-    'ogg': 'audio/ogg',
-    'ogv': 'video/ogg',
-    'flac': 'audio/flac',
-    'wav': 'audio/wav',
-    'm4a': 'audio/mp4',
-    'css': 'text/css',
-    'gif': 'image/gif',
-    'html': 'text/html',
-    'js': 'application/javascript',
-    'json': 'application/json',
-    'jpeg': 'image/jpeg',
-    'jpg': 'image/jpeg',
-    'otf': 'application/vnd.ms-opentype',
-    'pdf': 'application/pdf',
-    'png': 'image/png',
-    'svg': 'image/svg+xml',
-    'ttf': 'application/x-font-ttf',
-    'txt': 'text/plain',
-    'woff': 'application/font-woff',
-    'woff2': 'application/font-woff2',
-    'xhtml': 'application/xhtml+xml',
-    'map': 'application/json',
-    'avif': 'image/avif',
-    'webp': 'image/webp',
-}
-
-def guess_content_type(filename, default = None):
-    ext = filename.split('.')[-1].lower()
-    return DEFAULT_TYPE.get(ext, default)

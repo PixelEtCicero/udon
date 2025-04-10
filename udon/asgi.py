@@ -11,8 +11,10 @@ import time
 
 import fastapi
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.utils import is_body_allowed_for_status_code
 from pydantic import BaseModel
+from starlette.exceptions import HTTPException
 from starlette.types import Receive, Scope, Send
 import uvicorn
 
@@ -61,6 +63,7 @@ class APIStack:
     def __init__(self, prefix = "/", **options):
         options.setdefault("exception_handlers", {
             Exception: self.handle_error,
+            HTTPException: self.handle_http_error,
         })
         self.prefix = prefix
         self.options = options
@@ -69,7 +72,16 @@ class APIStack:
 
     async def handle_error(self, request: fastapi.Request, exc: Exception):
         logging.error(str(exc))
-        return response_json({"detail": str(exc)}, status_code=500)
+        return response_json({"error": str(exc)}, status_code=500)
+
+    async def handle_http_error(self, request: fastapi.Request, exc: HTTPException):
+        logging.error(str(exc))
+        headers = getattr(exc, "headers", None)
+        if not is_body_allowed_for_status_code(exc.status_code):
+            return Response(status_code=exc.status_code, headers=headers)
+
+        data = exc.detail if isinstance(exc.detail, dict) else {"error": exc.detail}
+        return JSONResponse(data, status_code=exc.status_code, headers=headers)
 
     def app_factory(self):
         return App(**self.options)
@@ -534,3 +546,7 @@ def response_view(view, request = None, response_headers = {}):
     return StreamingResponse(content=body,
                              status_code=status_code,
                              headers=headers)
+
+
+def response_file(path, ctype = None, etag = None):
+    return response_view(udon.xsgi.FileResourceView(path, ctype=ctype, etag=etag))

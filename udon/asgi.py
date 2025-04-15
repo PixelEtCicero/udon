@@ -11,7 +11,7 @@ import time
 
 import fastapi
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse as BaseStreamingResponse
 from fastapi.utils import is_body_allowed_for_status_code
 from pydantic import BaseModel
 from starlette.exceptions import HTTPException
@@ -304,6 +304,30 @@ async def log_http_middleware(request: fastapi.Request, call_next):
     return response
 
 
+import typing
+from starlette.background import BackgroundTask
+from starlette.responses import ContentStream
+
+class StreamingResponse(BaseStreamingResponse):
+    def __init__(
+        self,
+        content: ContentStream,
+        status_code: int = 200,
+        headers: typing.Mapping[str, str] | None = None,
+        media_type: str | None = None,
+        background: BackgroundTask | None = None,
+    ) -> None:
+        # starlette StreamingResponse wraps iterators into a thread (starlette.concurreny.iterate_in_threadpool)
+        # but sometimes it just hangs, probably due to some anyio internal reasons.
+        # Sync iterable must be used "as is", if a performance issue arises, then just reimpl the iterator itself.
+        if not isinstance(content, typing.AsyncIterable):
+            async def _(iterator):
+                for a in iterator:
+                    yield a
+            content = _(content)
+        BaseStreamingResponse.__init__(self, content, status_code, headers, media_type, background)
+
+
 def streaming(request: fastapi.Request, size: int, fd, timestamp: int = None, etag: str = None, headers: dict = None):
     status = 200
     body = iter(())
@@ -323,7 +347,7 @@ def streaming(request: fastapi.Request, size: int, fd, timestamp: int = None, et
     elif request.method != "HEAD":
         body = fd
 
-    return fastapi.responses.StreamingResponse(
+    return StreamingResponse(
         content=body,
         status_code=status,
         # Caching logic here is to support both If-None-Match and If-Modified-Since

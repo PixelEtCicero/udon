@@ -77,7 +77,7 @@ def response_view(view, request, response_headers = {}):
             yield data
             count -= len(data)
 
-    def _iter_range(body, offset, count, logger):
+    def _iter_range(body, offset, count):
         try:
             if (offset):
                 if body.seekable():
@@ -104,6 +104,7 @@ def response_view(view, request, response_headers = {}):
         headers["Last-Modified"] = view.mtime
     else:
         headers["Last-Modified"] = fmt_time(view.mtime)
+
     if view.etag is not None:
         headers["ETag"] = view.etag
 
@@ -130,7 +131,7 @@ def response_view(view, request, response_headers = {}):
         # request WITHOUT range header, and this is counter-intuitive from the client point-of-view
         # to receive 206 status on a simple GET request.
         status_code = 206 if view.size > length else 200
-        body = _iter_range(view.body, offset, end - offset, None)
+        body = _iter_range(view.body, offset, end - offset)
     else:
         headers["Content-Length"] = str(view.size)
         # For some reason in asgi passing directly the fd is extremely slow to send to client (x10)
@@ -139,12 +140,21 @@ def response_view(view, request, response_headers = {}):
         # def iterfile():
         #     yield from view.body
         # body = iterfile()
-        body = _iter_range(view.body, 0, view.size, None)
+        body = _iter_range(view.body, 0, view.size)
 
     for key in response_headers:
         headers[key] = response_headers[key]
 
     return (status_code, headers, body)
+
+
+async def iterate_in_threadpool(iterator):
+    as_iterator = iter(iterator)
+    while True:
+        try:
+            yield await anyio.to_thread.run_sync(_next, as_iterator)
+        except _StopIteration:
+            break
 
 
 class Form(object):

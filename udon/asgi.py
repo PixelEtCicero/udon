@@ -292,7 +292,7 @@ async def log_http_middleware(request: fastapi.Request, call_next):
     logging.info(
         "%.3f %s %s %s %d %s %s" % (
             process_time,
-            request.client.host,
+            client_ip(request),
             request.headers.get("HTTP_X_FORWARDED_FOR", "-"),
             request.method,
             response.status_code,

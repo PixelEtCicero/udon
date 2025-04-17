@@ -19,8 +19,19 @@ import json
 import threading
 import time
 
-import aiohttp
-import requests
+try:
+    import aiohttp
+except ImportError:
+    pass
+else:
+    AsyncHTTPError = aiohttp.client_exceptions.ClientResponseError
+
+try:
+    import requests
+except ImportError:
+    pass
+else:
+    HTTPError = requests.exceptions.HTTPError
 
 import udon.util
 
@@ -54,10 +65,6 @@ class InvalidCredentials(AuthError):
 
 class ExpiredCredentials(AuthError):
     pass
-
-
-HTTPError = requests.exceptions.HTTPError
-AsyncHTTPError = aiohttp.client_exceptions.ClientResponseError
 
 
 class ExpireCache:
@@ -112,10 +119,10 @@ class Portal:
     def user_apikey(self, request, access_token):
         raise NotImplementedError
 
-    def user(self, request, insecure = False):
+    def user(self, request):
         auth = request.headers.get("Authorization")
         if not auth:
-            return self.user_public(request) if insecure else self.user_noauth(request)
+            return self.user_noauth(request)
 
         parts = auth.split(' ', 1)
         scheme = parts[0]
@@ -168,10 +175,10 @@ class AsyncPortal:
     async def user_apikey(self, request, access_token):
         raise NotImplementedError
 
-    async def user(self, request, insecure = False):
+    async def user(self, request):
         auth = request.headers.get("Authorization")
         if not auth:
-            return await self.user_public(request) if insecure else await self.user_noauth(request)
+            return await self.user_noauth(request)
 
         parts = auth.split(' ', 1)
         scheme = parts[0]

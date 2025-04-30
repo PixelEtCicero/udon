@@ -15,6 +15,8 @@ from fastapi.responses import JSONResponse, StreamingResponse as BaseStreamingRe
 from fastapi.utils import is_body_allowed_for_status_code
 from pydantic import BaseModel
 from starlette.exceptions import HTTPException
+from starlette.requests import Request
+from starlette.responses import Response
 from starlette.types import Receive, Scope, Send
 import uvicorn
 
@@ -70,12 +72,12 @@ class APIStack:
         self.app = self.app_factory()
         self.apis = []
 
-    async def handle_error(self, request: fastapi.Request, exc: Exception):
-        logging.error(str(exc))
+    async def handle_error(self, request: Request, exc: Exception):
+        logging.error(f"{request.url}: {str(exc)}")
         return response_json({"error": str(exc)}, status_code=500)
 
-    async def handle_http_error(self, request: fastapi.Request, exc: HTTPException):
-        logging.error(str(exc))
+    async def handle_http_error(self, request: Request, exc: HTTPException):
+        logging.error(f"{request.url}: {str(exc)}")
         headers = getattr(exc, "headers", None)
         if not is_body_allowed_for_status_code(exc.status_code):
             return Response(status_code=exc.status_code, headers=headers)
@@ -230,11 +232,11 @@ def run(app, **kwargs):
 CONTEXTS = ContextVar("udon")
 
 # default request when outside of api route (mimics bottle behavior)
-CONTEXTS.set({"request": fastapi.Request(scope={"type": "http", "headers": {}})})
+CONTEXTS.set({"request": Request(scope={"type": "http", "headers": {}})})
 
 
 # per route request set by middleware
-async def context_http_middleware(request: fastapi.Request, call_next):
+async def context_http_middleware(request: Request, call_next):
     context = CONTEXTS.set({"request": request})
     response = await call_next(request)
     CONTEXTS.reset(context)
@@ -247,7 +249,7 @@ class LocalRequest():
         return getattr(CONTEXTS.get()["request"], name)
 
 
-# thread safe accessor for the *current* fastapi.Request
+# thread safe accessor for the *current* Request
 request = LocalRequest()
 _request = request
 
@@ -257,15 +259,12 @@ _request = request
 ###
 
 
-Response = fastapi.responses.Response
-
-
 def response_json(data, status_code = 200):
     return fastapi.responses.JSONResponse(jsonable_encoder(data), status_code=status_code)
 
 
 def response_ok(status_code = fastapi.status.HTTP_204_NO_CONTENT):
-    return fastapi.responses.Response(status_code=status_code)
+    return Response(status_code=status_code)
 
 
 def abort(status_code, detail = None):
@@ -279,7 +278,7 @@ async def request_to_stream_generator(req):
         yield data
 
 
-async def log_http_middleware(request: fastapi.Request, call_next):
+async def log_http_middleware(request: Request, call_next):
     start_time = time.perf_counter()
     response = await call_next(request)
     process_time = time.perf_counter() - start_time
@@ -328,7 +327,7 @@ class StreamingResponse(BaseStreamingResponse):
         BaseStreamingResponse.__init__(self, content, status_code, headers, media_type, background)
 
 
-def streaming(request: fastapi.Request, size: int, fd, timestamp: int = None, etag: str = None, headers: dict = None):
+def streaming(request: Request, size: int, fd, timestamp: int = None, etag: str = None, headers: dict = None):
     status = 200
     body = iter(())
     length = size
@@ -363,7 +362,7 @@ def streaming(request: fastapi.Request, size: int, fd, timestamp: int = None, et
             **headers})
 
 
-def parse_range(request: fastapi.Request, size):
+def parse_range(request: Request, size):
     value = request.headers.get("Range", "")
     if not value.startswith("bytes="):
         return None
@@ -426,19 +425,21 @@ def parsedate(date: str):
     return email.utils.parsedate_to_datetime(date)
 
 
-def modified_since(ts: int, request: fastapi.Request):
+def modified_since(ts: int, request: Request):
     ims = request.headers.get("If-Modified-Since", "")
     if ims:
         # mdate is offset-naive, must make imsdate naive too
         mdate = datetime.datetime.utcfromtimestamp(ts)
-        imsdate = parsedate(ims).replace(tzinfo = None)
-
+        try:
+            imsdate = parsedate(ims).replace(tzinfo=None)
+        except ValueError:
+            return True
         return (imsdate < mdate)
 
     return True
 
 
-def none_match(etag: str, request: fastapi.Request):
+def none_match(etag: str, request: Request):
     """
     etag: must already be enclosed with double quotes
     """
@@ -459,7 +460,7 @@ def none_match(etag: str, request: fastapi.Request):
 def access_control_route_handler(method, cors):
     options = {} if cors is True else cors
 
-    def _(request: fastapi.Request, response: fastapi.Response):
+    def _(request: Request, response: Response):
         set_access_control_headers(response,
                                    method="GET",
                                    origin=options.get("origin", request.headers.get("Origin")),
@@ -470,7 +471,7 @@ def access_control_route_handler(method, cors):
 def access_control_options_handler(method, cors):
     options = {} if cors is True else cors
 
-    def _(request: fastapi.Request, response: fastapi.Response):
+    def _(request: Request, response: Response):
         set_access_control_headers(response,
                                    method=method,
                                    origin=options.get("origin", request.headers.get("Origin")),

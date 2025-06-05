@@ -63,14 +63,17 @@ class API:
 class APIStack:
 
     def __init__(self, prefix = "/", **options):
-        options.setdefault("exception_handlers", {
-            Exception: self.handle_error,
-            HTTPException: self.handle_http_error,
-        })
+        options.setdefault("exception_handlers", self.get_exception_handlers())
         self.prefix = prefix
         self.options = options
         self.app = self.app_factory()
         self.apis = []
+
+    def get_exception_handlers(self):
+        return {
+            Exception: self.handle_error,
+            HTTPException: self.handle_http_error,
+        }
 
     async def handle_error(self, request: Request, exc: Exception):
         logging.error(f"{request.url}: {str(exc)}")
@@ -263,8 +266,8 @@ def response_json(data, status_code = 200):
     return fastapi.responses.JSONResponse(jsonable_encoder(data), status_code=status_code)
 
 
-def response_ok(status_code = fastapi.status.HTTP_204_NO_CONTENT):
-    return Response(status_code=status_code)
+def response_ok(status_code = fastapi.status.HTTP_204_NO_CONTENT, **kwargs):
+    return Response(status_code=status_code, **kwargs)
 
 
 def abort(status_code, detail = None):

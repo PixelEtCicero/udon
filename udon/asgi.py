@@ -186,7 +186,7 @@ class App(fastapi.FastAPI):
 
     async def __call__(self, scope: Scope, receive = Receive, send = Send):
         try:
-            return await fastapi.FastAPI.__call__(self, scope, receive, send)
+            await super().__call__(scope, receive, send)
         except Exception as exc:
             logging.exception(exc)
 

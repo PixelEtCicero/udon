@@ -306,9 +306,42 @@ async def log_http_middleware(request: Request, call_next):
     return response
 
 
+from collections.abc import AsyncIterable
+from starlette.background import BackgroundTask
+from starlette.responses import JSONResponse, StreamingResponse
+
+
+class JSONStreamingResponse(StreamingResponse, JSONResponse):
+    def __init__(
+        self,
+        content: AsyncIterable,
+        status_code: int = 200,
+        headers: dict[str, str] | None = None,
+        media_type: str | None = None,
+        background: BackgroundTask | None = None
+    ) -> None:
+        async def body_iterator() -> AsyncIterable[bytes]:
+            yield b"["
+            try:
+                yield self.render(jsonable_encoder(await content.__anext__()))
+                async for row in content:
+                    yield b"," + self.render(jsonable_encoder(row))
+            except StopAsyncIteration:
+                pass
+            yield b"]"
+
+        self.body_iterator = body_iterator()
+        self.status_code = status_code
+        if media_type is not None:
+            self.media_type = media_type
+        self.background = background
+        self.init_headers(headers)
+
+
 import typing
 from starlette.background import BackgroundTask
 from starlette.responses import ContentStream
+
 
 class StreamingResponse(BaseStreamingResponse):
     def __init__(

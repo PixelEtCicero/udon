@@ -133,6 +133,7 @@ class App(fastapi.FastAPI):
     def __init__(self, **kwargs):
         kwargs.setdefault("docs_url", None)
         kwargs.setdefault("redoc_url", None)
+        kwargs.setdefault("openapi_url", None)
         kwargs.setdefault("debug", False)
         fastapi.FastAPI.__init__(self, **kwargs)
         self.before_shutdown_handlers = set()

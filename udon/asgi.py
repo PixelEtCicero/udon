@@ -27,9 +27,11 @@ _apis = {}
 
 
 def api(path):
-    def _(setup):
+    def decorator(setup):
         _apis[setup] = API(path, setup)
-    return _
+        # return setup so the function still exists inside the module
+        return setup
+    return decorator
 
 
 class API:

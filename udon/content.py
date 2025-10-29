@@ -101,7 +101,9 @@ class _ContentWriter:
             self._end_headers()
         self.cksum.update(data)
         self.fp.write(data)
-        self.size += len(data)
+        count = len(data)
+        self.size += count
+        return count
 
     def write_header(self, hdr, value):
         assert not self._headers_done
@@ -139,6 +141,10 @@ class _ContentWriter:
         self.fp.close()
         if self.expect_size not in (None, self.size):
             raise ValueError("Content has incorrect size")
+
+    def flush(self):
+        # filelike compat
+        pass
 
     def _coerce_value(self, value):
         if not isinstance(value, bytes):

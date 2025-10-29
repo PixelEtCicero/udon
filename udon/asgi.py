@@ -1,3 +1,4 @@
+from collections.abc import AsyncIterable
 from contextvars import ContextVar
 import datetime
 import email.utils
@@ -8,15 +9,17 @@ import logging
 import os.path
 import socket
 import time
+import typing
 
 import fastapi
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, StreamingResponse as BaseStreamingResponse
 from fastapi.utils import is_body_allowed_for_status_code
 from pydantic import BaseModel
+from starlette.background import BackgroundTask
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
-from starlette.responses import Response
+from starlette.responses import ContentStream, JSONResponse, Response, StreamingResponse
 from starlette.types import Receive, Scope, Send
 import uvicorn
 
@@ -265,8 +268,8 @@ _request = request
 ###
 
 
-def response_json(data, status_code = 200):
-    return fastapi.responses.JSONResponse(jsonable_encoder(data), status_code=status_code)
+def response_json(data, status_code = 200, **kwargs):
+    return fastapi.responses.JSONResponse(jsonable_encoder(data), status_code=status_code, **kwargs)
 
 
 def response_ok(status_code = fastapi.status.HTTP_204_NO_CONTENT, **kwargs):
@@ -285,6 +288,9 @@ async def request_to_stream_generator(req):
 
 
 async def log_http_middleware(request: Request, call_next):
+    """
+    With Starlette/FastAPI: This middleware must be added at last to be the first one executed
+    """
     start_time = time.perf_counter()
     response = await call_next(request)
     process_time = time.perf_counter() - start_time
@@ -307,11 +313,6 @@ async def log_http_middleware(request: Request, call_next):
     )
 
     return response
-
-
-from collections.abc import AsyncIterable
-from starlette.background import BackgroundTask
-from starlette.responses import JSONResponse, StreamingResponse
 
 
 class JSONStreamingResponse(StreamingResponse, JSONResponse):
@@ -339,11 +340,6 @@ class JSONStreamingResponse(StreamingResponse, JSONResponse):
             self.media_type = media_type
         self.background = background
         self.init_headers(headers)
-
-
-import typing
-from starlette.background import BackgroundTask
-from starlette.responses import ContentStream
 
 
 class StreamingResponse(BaseStreamingResponse):
@@ -586,13 +582,13 @@ async def _request_json(request):
 ###
 
 
-def response_content(fp, public = False, max_age = 0, response_headers = {}):
+def response_content(fp, public = False, max_age = 0, response_headers = {}, **kwargs):
     view = udon.xsgi.ResourceView(fp,
                                   fp.info.size,
                                   fp.info.timestamp,
                                   ctype=fp.info.ctype,
                                   etag=fp.info.etag)
-    response = response_view(view, response_headers=response_headers)
+    response = response_view(view, response_headers=response_headers, **kwargs)
 
     visibility = "public" if public else "private"
     caching = "max-age={max_age}, must-revalidate" if max_age else "no-cache"
@@ -601,7 +597,7 @@ def response_content(fp, public = False, max_age = 0, response_headers = {}):
     return response
 
 
-def response_view(view, request = None, response_headers = {}):
+def response_view(view, request = None, response_headers = {}, **kwargs):
     if request is None:
         request = _request
 
@@ -609,8 +605,9 @@ def response_view(view, request = None, response_headers = {}):
 
     return StreamingResponse(content=body,
                              status_code=status_code,
-                             headers=headers)
+                             headers=headers,
+                             **kwargs)
 
 
-def response_file(path, ctype = None, etag = None):
-    return response_view(udon.xsgi.FileResourceView(path, ctype=ctype, etag=etag))
+def response_file(path, ctype = None, etag = None, **kwargs):
+    return response_view(udon.xsgi.FileResourceView(path, ctype=ctype, etag=etag), **kwargs)

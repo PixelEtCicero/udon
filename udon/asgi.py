@@ -573,7 +573,7 @@ async def _request_json(request):
 
     try:
         return json.loads(body)
-    except json.decoder.JSONDecodeError:
+    except (json.decoder.JSONDecodeError, UnicodeDecodeError):
         abort(400, "Invalid JSON content")
 
 

@@ -216,17 +216,17 @@ class AsyncPortal:
 
 class OpenIDClient:
 
-    def __init__(self, host, realm, client_id, client_secret, verify = True, scope = 'openid'):
+    def __init__(self, endpoint, realm, client_id, client_secret, verify = True, scope = 'openid'):
         self.verify = verify
         self.realm = realm
-        self.host = host
+        self.endpoint = endpoint
         self.scope = scope
         self.client_id = client_id
         self.client_secret = client_secret
         self.scope = scope
 
     def _url(self, action):
-        return "%s/auth/realms/%s/protocol/openid-connect/%s" % (self.host, self.realm, action)
+        return "%s/realms/%s/protocol/openid-connect/%s" % (self.endpoint, self.realm, action)
 
     def _request(self, method, action, data = None, headers = None):
         resp = requests.request(method, self._url(action), verify = self.verify, data = data, headers = headers)
@@ -258,10 +258,10 @@ class OpenIDClient:
 
 class AsyncOpenIDClient:
 
-    def __init__(self, host, realm, client_id, client_secret, verify = True, scope = 'openid', session = None):
+    def __init__(self, endpoint, realm, client_id, client_secret, verify = True, scope = 'openid', session = None):
         self.verify = verify
         self.realm = realm
-        self.host = host
+        self.endpoint = endpoint
         self.scope = scope
         self.client_id = client_id
         self.client_secret = client_secret
@@ -272,7 +272,7 @@ class AsyncOpenIDClient:
         await self.session.close()
 
     def _url(self, action):
-        return "%s/auth/realms/%s/protocol/openid-connect/%s" % (self.host, self.realm, action)
+        return "%s/realms/%s/protocol/openid-connect/%s" % (self.endpoint, self.realm, action)
 
     async def _request(self, method, action, data = None, headers = None):
         return await self.session.request(method=method, url=self._url(action), data=data, headers=headers)

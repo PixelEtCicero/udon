@@ -266,7 +266,7 @@ class AsyncOpenIDClient:
         self.client_id = client_id
         self.client_secret = client_secret
         self.scope = scope
-        self.session = session or aiohttp.ClientSession(raise_for_status=True)
+        self.session = session or aiohttp.ClientSession()
 
     async def release(self):
         await self.session.close()
@@ -275,7 +275,9 @@ class AsyncOpenIDClient:
         return "%s/realms/%s/protocol/openid-connect/%s" % (self.endpoint, self.realm, action)
 
     async def _request(self, method, action, data = None, headers = None):
-        return await self.session.request(method=method, url=self._url(action), data=data, headers=headers)
+        resp = await self.session.request(method=method, url=self._url(action), data=data, headers=headers)
+        resp.raise_for_status()
+        return resp
 
     async def login(self, username, password):
         response = await self._request('POST', 'token', data = { 'client_id': self.client_id,

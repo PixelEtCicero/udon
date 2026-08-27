@@ -6,6 +6,9 @@ import os
 import time
 
 
+QUOTE = '"'
+
+
 def fmt_time(timestamp = None):
     if timestamp is None:
         timestamp = time.time()
@@ -13,9 +16,14 @@ def fmt_time(timestamp = None):
 
 
 def quote_etag(etag: str, weak = False):
-    quote = '"'
     prefix = "W/" if weak else ""
-    return f"{prefix}{quote}{etag.strip(quote)}{quote}"
+    return f"{prefix}{QUOTE}{unquote_etag(etag)}{QUOTE}"
+
+
+def unquote_etag(etag: str):
+    if etag.startswith("W/"):
+        etag = etag[2:]
+    return etag.strip(QUOTE)
 
 
 class ResourceView:

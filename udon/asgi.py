@@ -393,7 +393,7 @@ def streaming(request: Request, size: int, fd, timestamp: int = None, etag: str 
             "Accept-Ranges": "bytes",
             # An Etag containing the mtime is pretty much useless, should be a real file hash.
             # TODO: use info.CRC from ZipInfo, and swift object MD5
-            "Etag": etag,
+            "Etag": udon.xsgi.quote_etag(etag),
             **headers})
 
 

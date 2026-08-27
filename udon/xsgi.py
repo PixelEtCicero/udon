@@ -12,6 +12,12 @@ def fmt_time(timestamp = None):
     return time.strftime("%a, %d %b %Y %H:%M:%S GMT", time.gmtime(timestamp))
 
 
+def quote_etag(etag: str, weak = False):
+    quote = '"'
+    prefix = "W/" if weak else ""
+    return f"{prefix}{quote}{etag.strip(quote)}{quote}"
+
+
 class ResourceView:
 
     def __init__(self, body, size, mtime, ctype = None, etag = None):
@@ -106,7 +112,7 @@ def response_view(view, request, response_headers = {}):
         headers["Last-Modified"] = fmt_time(view.mtime)
 
     if view.etag is not None:
-        headers["ETag"] = view.etag
+        headers["ETag"] = quote_etag(view.etag)
 
     if request.method == "HEAD":
         headers["Content-Length"] = str(view.size)
